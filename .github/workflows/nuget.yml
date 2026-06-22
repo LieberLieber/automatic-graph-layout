@@ -37,6 +37,14 @@ jobs:
             echo "version=1.0.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Replace BuildVersion placeholders
+        shell: pwsh
+        run: |
+          $version = '${{ steps.version.outputs.version }}'
+          Get-ChildItem GraphLayout -Recurse -Filter *.nuspec | ForEach-Object {
+            (Get-Content $_.FullName) -replace 'BuildVersion', $version | Set-Content $_.FullName
+          }
+
       - name: Pack Msagl
         run: nuget pack GraphLayout\MSAGL\AutomaticGraphLayout.nuspec -Version ${{ steps.version.outputs.version }} -OutputDirectory nupkgs
 
