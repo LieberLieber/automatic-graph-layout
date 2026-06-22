@@ -1,0 +1,67 @@
+# Builds the solution in Release mode and produces NuGet packages as artifacts
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+name: NuGet Packages
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and Pack
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Add msbuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Setup NuGet
+        uses: NuGet/setup-nuget@v2
+
+      - name: Restore NuGet Packages
+        run: nuget restore GraphLayout/GraphLayout.sln
+
+      - name: Build Release
+        run: msbuild GraphLayout\GraphLayout.sln /p:Configuration=Release
+
+      - name: Set package version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=1.0.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Replace BuildVersion placeholders
+        shell: pwsh
+        run: |
+          $version = '${{ steps.version.outputs.version }}'
+          Get-ChildItem GraphLayout -Recurse -Filter *.nuspec | ForEach-Object {
+            (Get-Content $_.FullName) -replace 'BuildVersion', $version | Set-Content $_.FullName
+          }
+
+      - name: Pack Msagl
+        run: nuget pack GraphLayout\MSAGL\AutomaticGraphLayout.nuspec -Version ${{ steps.version.outputs.version }} -OutputDirectory nupkgs
+
+      - name: Pack Msagl.Drawing
+        run: nuget pack GraphLayout\Drawing\AutomaticGraphLayout.Drawing.nuspec -Version ${{ steps.version.outputs.version }} -OutputDirectory nupkgs
+
+      - name: Pack Msagl.GraphViewerGDI
+        run: nuget pack GraphLayout\tools\GraphViewerGDI\GraphViewerGDI.nuspec -Version ${{ steps.version.outputs.version }} -OutputDirectory nupkgs
+
+      - name: Pack Msagl.WpfGraphControl
+        run: nuget pack GraphLayout\tools\WpfGraphControl\WpfGraphControl.nuspec -Version ${{ steps.version.outputs.version }} -OutputDirectory nupkgs
+
+      - name: Upload NuGet packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages
+          path: nupkgs\*.nupkg
+          if-no-files-found: error
