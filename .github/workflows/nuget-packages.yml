@@ -1,0 +1,86 @@
+name: Build NuGet Packages
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Package version (e.g. 1.1.13)'
+        required: true
+        default: '1.1.13'
+
+jobs:
+  build:
+    name: Build NuGet Packages
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+
+      - name: Determine version
+        id: version
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $ver = "${{ github.event.inputs.version }}"
+          } else {
+            $ver = "${{ github.ref_name }}" -replace '^v', ''
+          }
+          echo "VERSION=$ver" >> $env:GITHUB_OUTPUT
+          Write-Host "Package version: $ver"
+
+      - name: Set version in nuspec files
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.version.outputs.VERSION }}"
+          $files = @(
+            "GraphLayout/MSAGL/AutomaticGraphLayout.nuspec",
+            "GraphLayout/Drawing/AutomaticGraphLayout.Drawing.nuspec",
+            "GraphLayout/tools/GraphViewerGDI/GraphViewerGDI.nuspec"
+          )
+          foreach ($f in $files) {
+            (Get-Content $f) -replace 'BuildVersion', $ver | Set-Content $f
+            Write-Host "Updated $f with version $ver"
+          }
+
+      - name: Restore dependencies
+        run: |
+          dotnet restore GraphLayout/MSAGL/AutomaticGraphLayout.csproj
+          dotnet restore GraphLayout/Drawing/AutomaticGraphLayout.Drawing.csproj
+          dotnet restore GraphLayout/tools/GraphViewerGDI/GraphViewerGDI.csproj
+
+      - name: Build AutomaticGraphLayout (core)
+        run: dotnet build GraphLayout/MSAGL/AutomaticGraphLayout.csproj -c Release --no-restore
+
+      - name: Build AutomaticGraphLayout.Drawing
+        run: dotnet build GraphLayout/Drawing/AutomaticGraphLayout.Drawing.csproj -c Release --no-restore
+
+      - name: Build AutomaticGraphLayout.GraphViewerGDI
+        run: dotnet build GraphLayout/tools/GraphViewerGDI/GraphViewerGDI.csproj -c Release --no-restore
+
+      - name: Pack AutomaticGraphLayout (core)
+        run: dotnet pack GraphLayout/MSAGL/AutomaticGraphLayout.csproj -c Release --no-build --output nupkgs
+
+      - name: Pack AutomaticGraphLayout.Drawing
+        run: dotnet pack GraphLayout/Drawing/AutomaticGraphLayout.Drawing.csproj -c Release --no-build --output nupkgs
+
+      - name: Pack AutomaticGraphLayout.GraphViewerGDI
+        run: dotnet pack GraphLayout/tools/GraphViewerGDI/GraphViewerGDI.csproj -c Release --no-build --output nupkgs
+
+      - name: Upload NuGet packages as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages-${{ steps.version.outputs.VERSION }}
+          path: nupkgs/*.nupkg
+          if-no-files-found: error
